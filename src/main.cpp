@@ -28,18 +28,17 @@ WiFiClient client;
 
 String location = "";
 
-unsigned long livingAddress = 52941634;
-unsigned long bedroomAddress = 22070078;
-NewRemoteTransmitter living(livingAddress, 14, 257);
-NewRemoteTransmitter bedroom(bedroomAddress, 3, 258);
+unsigned long nexa = 22070078;
+byte livingUnit = 4;
+byte bedroomUnit = 3;
+NewRemoteTransmitter nexaTransmitter(nexa, 15, 258);
 
 void measureBattery();
 void measureEnvironment();
-void rfSend();
+void rfSend(byte, bool);
 
 Ticker enviroTicker(measureEnvironment, 300000);
 Ticker batteryTicker(measureBattery, 600000);
-Ticker rfTicker(rfSend, 10000);
 
 void setup()
 {
@@ -125,7 +124,6 @@ void setup()
     display.clear();
     enviroTicker.start();
     batteryTicker.start();
-    rfTicker.start();
     measureBattery();
     measureEnvironment();
 }
@@ -136,7 +134,6 @@ void loop()
     ArduinoOTA.handle();
     enviroTicker.update();
     batteryTicker.update();
-    rfTicker.update();
 }
 void measureBattery()
 {
@@ -159,9 +156,6 @@ void measureBattery()
         ThingSpeak.setField(6, level);
     }
     int status = ThingSpeak.writeFields(channelId, writeAPIKey);
-    // Serial.println("Battery thing:" + status);
-    // display.drawString(0, DISPLAY_HEIGHT - 10, "Battery thing:" + status);
-    // display.display();
 }
 void measureEnvironment()
 {
@@ -175,6 +169,28 @@ void measureEnvironment()
     {
         Serial.println("Failed to read from DHT sensor!");
         return;
+    }
+    if (humidity < 40)
+    {
+        if (location == "Living Room")
+        {
+            rfSend(livingUnit, true);
+        }
+        else if (location == "Bedroom")
+        {
+            rfSend(livingUnit, false);
+        }
+    }
+    else if (humidity > 55)
+    {
+        if (location == "Living Room")
+        {
+            rfSend(bedroomUnit, true);
+        }
+        else if (location == "Bedroom")
+        {
+            rfSend(bedroomUnit, false);
+        }
     }
     float index = dht.computeHeatIndex(temp, humidity, false);
     Serial.print("Humidity: " + String(humidity) + "%\t");
@@ -196,16 +212,10 @@ void measureEnvironment()
         ThingSpeak.setField(4, temp);
     }
     int status = ThingSpeak.writeFields(channelId, writeAPIKey);
-    // Serial.println("Temp thing:" + status);
-    // display.drawString(0, DISPLAY_HEIGHT - 10, "Temp thing:" + status);
-    // display.display();
 }
 
-void rfSend()
+void rfSend(byte unit, bool status)
 {
-    living.sendUnit(6, true);
-    delay(5000);
-    // bedroom.sendUnit(15, false);
-    living.sendUnit(6, false);
-    delay(5000);
+    nexaTransmitter.sendUnit(unit, status);
+    Serial.println("Turned living room " + String(status));
 }
