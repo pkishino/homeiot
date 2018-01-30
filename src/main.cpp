@@ -8,8 +8,8 @@
 #include <ArduinoOTA.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
-#include </Users/Patrick/.platformio/lib/Ticker_ID1586/Ticker.h>
 #include <ThingSpeak.h>
+#include <EEPROM.h>
 
 SSD1306 display(0x3c, 4, 5);
 
@@ -19,8 +19,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
 const char *ssid = "***REMOVED***";
 const char *password = "***REMOVED***";
-// const char *ssid = "***REMOVED***";
-// const char *password = "***REMOVED***";
+const char *devicePass = "***REMOVED***";
 
 const char *writeAPIKey = "***REMOVED***";
 unsigned long channelId = 404454;
@@ -33,47 +32,61 @@ byte livingUnit = 4;
 byte bedroomUnit = 3;
 NewRemoteTransmitter nexaTransmitter(nexa, 15, 258);
 
+void setupWifi();
+void setupOTA();
+void setupDisplay();
 void measureBattery();
 void measureEnvironment();
 void rfSend(byte, bool);
+void uploadResults();
 
-Ticker enviroTicker(measureEnvironment, 300000);
-Ticker batteryTicker(measureBattery, 600000);
+#define CHECK_INTERVAL 30
 
 void setup()
 {
     Serial.begin(115200);
     Serial.println("Serial up and running");
+    // EEPROM.begin(512);
+    // byte sleep_count = EEPROM.read(0);
 
-    String mac = WiFi.macAddress();
-    Serial.println("MAC:" + mac);
-    if (mac == "***REMOVED***")
-    {
-        location = "Bedroom";
-    }
-    else if (mac = "***REMOVED***")
-    {
-        location = "Living Room";
-    }
+    // Serial.println("Sleep count" + String(sleep_count));
+    setupDisplay();
+    setupWifi();
+    dht.begin();
+    ThingSpeak.begin(client);
+    display.clear();
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    measureBattery();
+    measureEnvironment();
+    uploadResults();
+    // sleep_count++;
+    // EEPROM.write(0, sleep_count);
+    // EEPROM.commit();
+    WiFi.mode(WIFI_OFF);
+    delay(10);
+    WiFi.forceSleepBegin();
+    delay(10);
+    display.displayOff();
+    Serial.println("Sleeping...");
+    ESP.deepSleep(CHECK_INTERVAL * 1000000 * 60, WAKE_RF_DISABLED);
+}
 
+void loop()
+{
+}
+void setupDisplay()
+{
     display.init();
     display.flipScreenVertically();
     display.setContrast(255);
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    while (WiFi.waitForConnectResult() != WL_CONNECTED)
-    {
-        Serial.println("Connection Failed! Rebooting...");
-        display.drawString(DISPLAY_WIDTH / 2, 10, "Connection Failed! Rebooting...");
-        display.display();
-        delay(5000);
-        ESP.restart();
-    }
+}
+void setupOTA()
+{
     const char *hostname = location.c_str();
     ArduinoOTA.setHostname(hostname);
+    ArduinoOTA.setPassword(devicePass);
 
     ArduinoOTA.onStart([]() {
         String type;
@@ -113,32 +126,38 @@ void setup()
         delay(5000);
     });
     ArduinoOTA.begin();
-    dht.begin();
-    ThingSpeak.begin(client);
-
+}
+void setupWifi()
+{
+    String mac = WiFi.macAddress();
+    Serial.println("MAC:" + mac);
+    if (mac == "***REMOVED***")
+    {
+        location = "Bedroom";
+    }
+    else if (mac = "***REMOVED***")
+    {
+        location = "Living Room";
+    }
+    WiFi.persistent(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+    while (WiFi.waitForConnectResult() != WL_CONNECTED)
+    {
+        Serial.println("Connection Failed! Rebooting...");
+        display.drawString(DISPLAY_WIDTH / 2, 10, "Connection Failed!");
+        display.display();
+        delay(3000);
+        ESP.restart();
+    }
     display.clear();
     display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "IP:" + WiFi.localIP().toString());
     display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Monitor for:" + location);
     display.display();
     delay(3000);
-    display.clear();
-    enviroTicker.start();
-    batteryTicker.start();
-    measureBattery();
-    measureEnvironment();
-}
-
-void loop()
-{
-    display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
-    ArduinoOTA.handle();
-    enviroTicker.update();
-    batteryTicker.update();
 }
 void measureBattery()
 {
-    display.clear();
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
     int raw = analogRead(A0);
     int level = map(raw, 537, 718, 0, 100);
     display.drawString(0, 10, "Raw:" + String(raw));
@@ -155,12 +174,9 @@ void measureBattery()
     {
         ThingSpeak.setField(6, level);
     }
-    int status = ThingSpeak.writeFields(channelId, writeAPIKey);
 }
 void measureEnvironment()
 {
-    display.clear();
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
     float humidity = dht.readHumidity();
     float temp = dht.readTemperature();
 
@@ -170,7 +186,7 @@ void measureEnvironment()
         Serial.println("Failed to read from DHT sensor!");
         return;
     }
-    if (humidity < 40)
+    if (humidity <= 42)
     {
         if (location == "Living Room")
         {
@@ -178,14 +194,14 @@ void measureEnvironment()
         }
         else if (location == "Bedroom")
         {
-            rfSend(livingUnit, false);
+            rfSend(bedroomUnit, true);
         }
     }
-    else if (humidity > 55)
+    else if (humidity >= 47)
     {
         if (location == "Living Room")
         {
-            rfSend(bedroomUnit, true);
+            rfSend(livingUnit, false);
         }
         else if (location == "Bedroom")
         {
@@ -196,9 +212,9 @@ void measureEnvironment()
     Serial.print("Humidity: " + String(humidity) + "%\t");
     Serial.print("Temperature: " + String(temp) + "˚C\t");
     Serial.print("Heat Index:" + String(temp) + "˚C\n");
-    display.drawString(0, DISPLAY_HEIGHT / 2 - 10, "Humidity:" + String(humidity) + '%');
-    display.drawString(0, DISPLAY_HEIGHT / 2, "Temperature:" + String(temp) + "˚C");
-    display.drawString(0, DISPLAY_HEIGHT / 2 + 10, "Heat Index:" + String(index) + "˚C");
+    display.drawString(0, 30, "Humidity:" + String(humidity) + '%');
+    display.drawString(0, 40, "Temperature:" + String(temp) + "˚C");
+    display.drawString(0, 50, "Heat Index:" + String(index) + "˚C");
     display.display();
 
     if (location == "Living Room")
@@ -211,11 +227,16 @@ void measureEnvironment()
         ThingSpeak.setField(2, humidity);
         ThingSpeak.setField(4, temp);
     }
-    int status = ThingSpeak.writeFields(channelId, writeAPIKey);
 }
 
 void rfSend(byte unit, bool status)
 {
     nexaTransmitter.sendUnit(unit, status);
     Serial.println("Turned living room " + String(status));
+}
+
+void uploadResults()
+{
+    int status = ThingSpeak.writeFields(channelId, writeAPIKey);
+    Serial.println("Thingspeak result: " + String(status));
 }
