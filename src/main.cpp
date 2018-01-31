@@ -9,7 +9,6 @@
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <ThingSpeak.h>
-#include <EEPROM.h>
 
 SSD1306 display(0x3c, 4, 5);
 
@@ -46,18 +45,11 @@ void setup()
 {
     Serial.begin(115200);
     Serial.println("Serial up and running");
-    // EEPROM.begin(512);
-    // byte sleep_count = EEPROM.read(0);
-
-    // Serial.println("Sleep count" + String(sleep_count));
     setupDisplay();
     setupWifi();
     measureBattery();
     measureEnvironment();
     uploadResults();
-    // sleep_count++;
-    // EEPROM.write(0, sleep_count);
-    // EEPROM.commit();
     WiFi.mode(WIFI_OFF);
     delay(100);
     WiFi.forceSleepBegin();
@@ -198,10 +190,12 @@ void measureEnvironment()
         if (location == "Living Room")
         {
             rfSend(livingUnit, true);
+            ThingSpeak.setField(7, 1);
         }
         else if (location == "Bedroom")
         {
             rfSend(bedroomUnit, true);
+            ThingSpeak.setField(8, 1);
         }
     }
     else if (humidity >= 47)
@@ -209,10 +203,12 @@ void measureEnvironment()
         if (location == "Living Room")
         {
             rfSend(livingUnit, false);
+            ThingSpeak.setField(7, 0);
         }
         else if (location == "Bedroom")
         {
             rfSend(bedroomUnit, false);
+            ThingSpeak.setField(8, 0);
         }
     }
     float index = dht.computeHeatIndex(temp, humidity, false);
