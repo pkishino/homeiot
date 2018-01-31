@@ -52,10 +52,6 @@ void setup()
     // Serial.println("Sleep count" + String(sleep_count));
     setupDisplay();
     setupWifi();
-    dht.begin();
-    ThingSpeak.begin(client);
-    display.clear();
-    display.setTextAlignment(TEXT_ALIGN_LEFT);
     measureBattery();
     measureEnvironment();
     uploadResults();
@@ -63,12 +59,16 @@ void setup()
     // EEPROM.write(0, sleep_count);
     // EEPROM.commit();
     WiFi.mode(WIFI_OFF);
-    delay(10);
+    delay(100);
     WiFi.forceSleepBegin();
-    delay(10);
+    delay(100);
     display.displayOff();
     Serial.println("Sleeping...");
-    ESP.deepSleep(CHECK_INTERVAL * 1000000 * 60, WAKE_RF_DISABLED);
+    Serial.print("Info:");
+    Serial.print(ESP.getSdkVersion()); //Info:2.1.0(deb1901)0000000031
+    Serial.print(ESP.getCoreVersion());
+    Serial.print(ESP.getBootVersion());
+    ESP.deepSleep(CHECK_INTERVAL * 1000000 * 60, WAKE_RF_DEFAULT);
 }
 
 void loop()
@@ -140,6 +140,7 @@ void setupWifi()
         location = "Living Room";
     }
     WiFi.persistent(false);
+    WiFi.forceSleepWake();
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     while (WiFi.waitForConnectResult() != WL_CONNECTED)
@@ -150,11 +151,16 @@ void setupWifi()
         delay(3000);
         ESP.restart();
     }
+
+    ThingSpeak.begin(client);
+
     display.clear();
     display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "IP:" + WiFi.localIP().toString());
     display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Monitor for:" + location);
     display.display();
     delay(3000);
+    display.clear();
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
 }
 void measureBattery()
 {
@@ -177,10 +183,11 @@ void measureBattery()
 }
 void measureEnvironment()
 {
+    dht.begin();
+    delay(500);
     float humidity = dht.readHumidity();
     float temp = dht.readTemperature();
 
-    // Check if any reads failed and exit early (to try again).
     if (isnan(humidity) || isnan(temp))
     {
         Serial.println("Failed to read from DHT sensor!");
