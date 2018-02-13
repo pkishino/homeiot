@@ -8,7 +8,6 @@
 #include <ArduinoOTA.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
-#include <ThingSpeak.h>
 
 SSD1306 display(0x3c, 4, 5);
 
@@ -20,9 +19,11 @@ const char *ssid = "***REMOVED***";
 const char *password = "***REMOVED***";
 const char *devicePass = "***REMOVED***";
 
-const char *writeAPIKey = "***REMOVED***";
-unsigned long channelId = 404454;
+const char *host = "api.thingspeak.com";
+const int httpPort = 80;
+String writeAPIKey = "***REMOVED***";
 WiFiClient client;
+String thingspeak = "";
 
 String location = "";
 
@@ -144,8 +145,6 @@ void setupWifi()
         ESP.restart();
     }
 
-    ThingSpeak.begin(client);
-
     display.clear();
     display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "IP:" + WiFi.localIP().toString());
     display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Monitor for:" + location);
@@ -157,7 +156,7 @@ void setupWifi()
 void measureBattery()
 {
     int raw = analogRead(A0);
-    int level = map(raw, 537, 718, 0, 100);
+    int level = map(raw, 511, 718, 0, 100);
     display.drawString(0, 10, "Raw:" + String(raw));
     display.drawString(0, 20, "Level:" + String(level) + '%');
     display.display();
@@ -166,11 +165,11 @@ void measureBattery()
 
     if (location == "Living Room")
     {
-        ThingSpeak.setField(5, level);
+        thingspeak += "&field5=" + String(level);
     }
     else if (location == "Bedroom")
     {
-        ThingSpeak.setField(6, level);
+        thingspeak += "&field6=" + String(level);
     }
 }
 void measureEnvironment()
@@ -190,12 +189,12 @@ void measureEnvironment()
         if (location == "Living Room")
         {
             rfSend(livingUnit, true);
-            ThingSpeak.setField(7, 1);
+            thingspeak += "&field7=1";
         }
         else if (location == "Bedroom")
         {
             rfSend(bedroomUnit, true);
-            ThingSpeak.setField(8, 1);
+            thingspeak += "&field8=1";
         }
     }
     else if (humidity >= 47)
@@ -203,12 +202,12 @@ void measureEnvironment()
         if (location == "Living Room")
         {
             rfSend(livingUnit, false);
-            ThingSpeak.setField(7, 0);
+            thingspeak += "&field7=0";
         }
         else if (location == "Bedroom")
         {
             rfSend(bedroomUnit, false);
-            ThingSpeak.setField(8, 0);
+            thingspeak += "&field8=0";
         }
     }
     float index = dht.computeHeatIndex(temp, humidity, false);
@@ -222,13 +221,13 @@ void measureEnvironment()
 
     if (location == "Living Room")
     {
-        ThingSpeak.setField(1, humidity);
-        ThingSpeak.setField(3, temp);
+        thingspeak += "&field1=" + String(humidity);
+        thingspeak += "&field3=" + String(temp);
     }
     else if (location == "Bedroom")
     {
-        ThingSpeak.setField(2, humidity);
-        ThingSpeak.setField(4, temp);
+        thingspeak += "&field2=" + String(humidity);
+        thingspeak += "&field4=" + String(temp);
     }
 }
 
@@ -236,10 +235,30 @@ void rfSend(byte unit, bool status)
 {
     nexaTransmitter.sendUnit(unit, status);
     Serial.println("Turned living room " + String(status));
+    delay(1000);
 }
 
 void uploadResults()
 {
-    int status = ThingSpeak.writeFields(channelId, writeAPIKey);
-    Serial.println("Thingspeak result: " + String(status));
+    if (!client.connect(host, httpPort))
+    {
+        return;
+    }
+    String postStr = writeAPIKey;
+    postStr += thingspeak;
+    postStr += "\r\n\r\n";
+
+    client.print("POST /update HTTP/1.1\n");
+    client.print("Host: api.thingspeak.com\n");
+    client.print("Connection: close\n");
+    client.print("X-THINGSPEAKAPIKEY: " + writeAPIKey + "\n");
+    client.print("Content-Type: application/x-www-form-urlencoded\n");
+    client.print("Content-Length: ");
+    client.print(postStr.length());
+    client.print("\n\n");
+    client.print(postStr);
+    delay(1000);
+    Serial.println("Thingspeak result: " + String(client.read()));
+    thingspeak = "";
+    Serial.println(postStr);
 }
