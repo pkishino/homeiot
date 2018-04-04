@@ -1,71 +1,78 @@
 #include <Arduino.h>
-#include <NewRemoteTransmitter.h>
 #include <Wire.h>
-#include <SSD1306.h>
+#include <SSD1306Wire.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <PubSubClient.h>
 
-SSD1306 display(0x3c, 4, 5);
+SSD1306Wire display(0x3c, 4, 5);
 
 #define DHTPIN 2
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
-const char *ssid = "***REMOVED***";
-const char *password = "***REMOVED***";
-const char *devicePass = "***REMOVED***";
+#define BUTTONPIN 12
 
-const char *host = "api.thingspeak.com";
-const int httpPort = 80;
-String writeAPIKey = "***REMOVED***";
-WiFiClient client;
-String thingspeak = "";
+#define ssid "***REMOVED***"
+#define password "***REMOVED***"
+#define devicePass "***REMOVED***"
 
 String location = "";
 
-unsigned long nexa = 22070078;
-byte livingUnit = 4;
-byte bedroomUnit = 3;
-NewRemoteTransmitter nexaTransmitter(nexa, 15, 258);
+WiFiClient wifiClient;
+
+#define mqtt_server "***REMOVED***"
+#define mqtt_user "***REMOVED***"
+#define mqtt_password "***REMOVED***"
+
+String sensor = "sensor/";
+
+PubSubClient mqttClient(wifiClient);
+long lastMsg = 60000;
+
+float humidity, temperature, heatIndex = 0.0;
+int raw, level = 0;
 
 void setupWifi();
 void setupOTA();
 void setupDisplay();
 void measureBattery();
 void measureEnvironment();
-void rfSend(byte, bool);
-void uploadResults();
-
-#define CHECK_INTERVAL 30
+void reconnectMqtt();
+void displayInterrupt();
 
 void setup()
 {
     Serial.begin(115200);
     Serial.println("Serial up and running");
+    pinMode(BUTTONPIN, INPUT_PULLUP);
+    attachInterrupt(BUTTONPIN, displayInterrupt, RISING);
     setupDisplay();
     setupWifi();
-    measureBattery();
-    measureEnvironment();
-    uploadResults();
-    WiFi.mode(WIFI_OFF);
-    delay(100);
-    WiFi.forceSleepBegin();
-    delay(100);
-    display.displayOff();
-    Serial.println("Sleeping...");
-    Serial.print("Info:");
-    Serial.print(ESP.getSdkVersion()); //Info:2.1.0(deb1901)0000000031
-    Serial.print(ESP.getCoreVersion());
-    Serial.print(ESP.getBootVersion());
-    ESP.deepSleep(CHECK_INTERVAL * 1000000 * 60, WAKE_RF_DEFAULT);
+    setupOTA();
+    // mqttClient.setServer(mqtt_server, 1883);
+    Serial.println("Setup completed, turning display off");
+    display.clear();
+    // display.displayOff();
 }
 
 void loop()
 {
+    ArduinoOTA.handle();
+    long now = millis();
+    display.clear();
+    if (now - lastMsg > 1000 * 600)
+    {
+        Serial.println("Running measurements");
+        lastMsg = now;
+        // reconnectMqtt();
+        measureBattery();
+        measureEnvironment();
+    }
 }
 void setupDisplay()
 {
@@ -74,6 +81,7 @@ void setupDisplay()
     display.setContrast(255);
     display.setFont(ArialMT_Plain_10);
     display.setTextAlignment(TEXT_ALIGN_CENTER_BOTH);
+    display.clear();
 }
 void setupOTA()
 {
@@ -89,12 +97,12 @@ void setupOTA()
             type = "filesystem";
 
         display.clear();
-        display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "OTA Update");
+        display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update");
         display.display();
     });
     ArduinoOTA.onEnd([]() {
         display.clear();
-        display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Restart");
+        display.drawString(display.getWidth() / 2, display.getHeight() / 2, "Restart");
         display.display();
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -104,17 +112,17 @@ void setupOTA()
     });
     ArduinoOTA.onError([](ota_error_t error) {
         display.clear();
-        display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "OTA Error :");
+        display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Error :");
         if (error == OTA_AUTH_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Auth Failed");
+            display.drawString(display.getWidth() / 2, 32, "Auth Failed");
         else if (error == OTA_BEGIN_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Begin Failed");
+            display.drawString(display.getWidth() / 2, 32, "Begin Failed");
         else if (error == OTA_CONNECT_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Connect Failed");
+            display.drawString(display.getWidth() / 2, 32, "Connect Failed");
         else if (error == OTA_RECEIVE_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Receive Failed");
+            display.drawString(display.getWidth() / 2, 32, "Receive Failed");
         else if (error == OTA_END_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "End Failed");
+            display.drawString(display.getWidth() / 2, 32, "End Failed");
         display.display();
         delay(5000);
     });
@@ -127,10 +135,14 @@ void setupWifi()
     if (mac == "***REMOVED***")
     {
         location = "Bedroom";
+        sensor += "bedroom";
+        // switch_number += '0';
     }
     else if (mac = "***REMOVED***")
     {
         location = "Living Room";
+        sensor += "livingroom";
+        // switch_number += '1'
     }
     WiFi.persistent(false);
     WiFi.forceSleepWake();
@@ -139,126 +151,79 @@ void setupWifi()
     while (WiFi.waitForConnectResult() != WL_CONNECTED)
     {
         Serial.println("Connection Failed! Rebooting...");
-        display.drawString(DISPLAY_WIDTH / 2, 10, "Connection Failed!");
+        display.drawString(display.getWidth() / 2, 10, "Connection Failed!");
         display.display();
         delay(3000);
         ESP.restart();
     }
 
     display.clear();
-    display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "IP:" + WiFi.localIP().toString());
-    display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Monitor for:" + location);
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "IP:" + WiFi.localIP().toString());
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2, "Monitor for:" + location);
     display.display();
     delay(3000);
     display.clear();
     display.setTextAlignment(TEXT_ALIGN_LEFT);
+    // display.displayOff();
+}
+void reconnectMqtt()
+{
+
+    while (!mqttClient.connected())
+    {
+        Serial.print("Connecting to MQTT broker ...");
+        if (mqttClient.connect("ESP8266Client", mqtt_user, mqtt_password))
+        {
+            Serial.println("OK");
+        }
+        else
+        {
+            Serial.print("KO, error : ");
+            Serial.print(mqttClient.state());
+            Serial.println(" Wait 5 secondes before to retry");
+            delay(5000);
+        }
+    }
 }
 void measureBattery()
 {
-    int raw = analogRead(A0);
-    int level = map(raw, 511, 718, 0, 100);
-    display.drawString(0, 10, "Raw:" + String(raw));
-    display.drawString(0, 20, "Level:" + String(level) + '%');
-    display.display();
+    raw = analogRead(A0);
+    level = map(raw, 511, 718, 0, 100);
     Serial.println("Level:" + String(level) + '%');
     Serial.println("raw:" + String(raw));
-
-    if (location == "Living Room")
-    {
-        thingspeak += "&field5=" + String(level);
-    }
-    else if (location == "Bedroom")
-    {
-        thingspeak += "&field6=" + String(level);
-    }
+    // mqttClient.publish((sensor + "/battery_level").c_str(), String(level).c_str(), true);
+    // mqttClient.publish((sensor + "/battery_raw").c_str(), String(raw).c_str(), true);
 }
 void measureEnvironment()
 {
     dht.begin();
     delay(500);
-    float humidity = dht.readHumidity();
-    float temp = dht.readTemperature();
-
-    if (isnan(humidity) || isnan(temp))
+    humidity = dht.readHumidity();
+    temperature = dht.readTemperature();
+    if (isnan(humidity) || isnan(temperature))
     {
         Serial.println("Failed to read from DHT sensor!");
         return;
     }
-    if (humidity <= 42)
-    {
-        if (location == "Living Room")
-        {
-            rfSend(livingUnit, true);
-            thingspeak += "&field7=1";
-        }
-        else if (location == "Bedroom")
-        {
-            rfSend(bedroomUnit, true);
-            thingspeak += "&field8=1";
-        }
-    }
-    else if (humidity >= 47)
-    {
-        if (location == "Living Room")
-        {
-            rfSend(livingUnit, false);
-            thingspeak += "&field7=0";
-        }
-        else if (location == "Bedroom")
-        {
-            rfSend(bedroomUnit, false);
-            thingspeak += "&field8=0";
-        }
-    }
-    float index = dht.computeHeatIndex(temp, humidity, false);
+    heatIndex = dht.computeHeatIndex(temperature, humidity, false);
     Serial.print("Humidity: " + String(humidity) + "%\t");
-    Serial.print("Temperature: " + String(temp) + "˚C\t");
-    Serial.print("Heat Index:" + String(temp) + "˚C\n");
+    Serial.print("Temperature: " + String(temperature) + "˚C\t");
+    Serial.print("Heat Index:" + String(heatIndex) + "˚C\n");
+
+    // mqttClient.publish((sensor + "/temperature").c_str(), String(temperature).c_str(), true);
+    // mqttClient.publish((sensor + "/humidity").c_str(), String(humidity).c_str(), true);
+    // mqttClient.publish((sensor + "/heatindex").c_str(), String(heatIndex).c_str(), true);
+}
+void displayInterrupt()
+{
+    Serial.println("Interrupted, displaying current info");
+    // display.displayOn();
+    display.clear();
+    display.drawString(0, 10, "Raw:" + String(raw));
+    display.drawString(0, 20, "Level:" + String(level) + '%');
     display.drawString(0, 30, "Humidity:" + String(humidity) + '%');
-    display.drawString(0, 40, "Temperature:" + String(temp) + "˚C");
-    display.drawString(0, 50, "Heat Index:" + String(index) + "˚C");
+    display.drawString(0, 40, "Temperature:" + String(temperature) + "˚C");
+    display.drawString(0, 50, "Heat Index:" + String(heatIndex) + "˚C");
     display.display();
-
-    if (location == "Living Room")
-    {
-        thingspeak += "&field1=" + String(humidity);
-        thingspeak += "&field3=" + String(temp);
-    }
-    else if (location == "Bedroom")
-    {
-        thingspeak += "&field2=" + String(humidity);
-        thingspeak += "&field4=" + String(temp);
-    }
-}
-
-void rfSend(byte unit, bool status)
-{
-    nexaTransmitter.sendUnit(unit, status);
-    Serial.println("Turned living room " + String(status));
-    delay(1000);
-}
-
-void uploadResults()
-{
-    if (!client.connect(host, httpPort))
-    {
-        return;
-    }
-    String postStr = writeAPIKey;
-    postStr += thingspeak;
-    postStr += "\r\n\r\n";
-
-    client.print("POST /update HTTP/1.1\n");
-    client.print("Host: api.thingspeak.com\n");
-    client.print("Connection: close\n");
-    client.print("X-THINGSPEAKAPIKEY: " + writeAPIKey + "\n");
-    client.print("Content-Type: application/x-www-form-urlencoded\n");
-    client.print("Content-Length: ");
-    client.print(postStr.length());
-    client.print("\n\n");
-    client.print(postStr);
-    delay(1000);
-    Serial.println("Thingspeak result: " + String(client.read()));
-    thingspeak = "";
-    Serial.println(postStr);
+    // display.displayOff();
 }
