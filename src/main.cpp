@@ -6,22 +6,22 @@
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <PubSubClient.h>
+#include <passwords.h>
 
 #define DHTPIN 2
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
-#define ssid "***REMOVED***"
-#define password "***REMOVED***"
-#define devicePass "***REMOVED***"
+const char *ssid = ACCESS_POINT;
+const char *password = ACCESS_PASS;
+const char *devicePass = ESP_PASS;
 
 String location = "";
 
 WiFiClient wifiClient;
-
-#define mqtt_server "***REMOVED***"
-#define mqtt_user "***REMOVED***"
-#define mqtt_password "***REMOVED***"
+const char *mqtt_server = MQTT_IP;
+const char *mqtt_user = MQTT_USER;
+const char *mqtt_password = MQTT_PASS;
 
 String sensor = "sensor/";
 
@@ -70,12 +70,12 @@ void setupWifi()
 {
     String mac = WiFi.macAddress();
     Serial.println("MAC:" + mac);
-    if (mac == "***REMOVED***")
+    if (mac == MAC_BED)
     {
         location = "Bedroom";
         sensor += "bedroom";
     }
-    else if (mac = "***REMOVED***")
+    else if (mac = MAC_LIVING)
     {
         location = "Living Room";
         sensor += "livingroom";
