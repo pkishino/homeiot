@@ -8,6 +8,7 @@
 #include <ArduinoOTA.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <passwords.h>
 
 SSD1306 display(0x3c, 4, 5);
 
@@ -15,13 +16,13 @@ SSD1306 display(0x3c, 4, 5);
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
-const char *ssid = "***REMOVED***";
-const char *password = "***REMOVED***";
-const char *devicePass = "***REMOVED***";
+const char *ssid = ACCESS_POINT;
+const char *password = ACCESS_PASS;
+const char *devicePass = ESP_PASS;
 
 const char *host = "api.thingspeak.com";
 const int httpPort = 80;
-String writeAPIKey = "***REMOVED***";
+String writeAPIKey = THINGSPEAK;
 WiFiClient client;
 String thingspeak = "";
 
@@ -89,12 +90,12 @@ void setupOTA()
             type = "filesystem";
 
         display.clear();
-        display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "OTA Update");
+        display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Update");
         display.display();
     });
     ArduinoOTA.onEnd([]() {
         display.clear();
-        display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Restart");
+        display.drawString(display.getWidth() / 2, display.getHeight() / 2, "Restart");
         display.display();
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -104,17 +105,17 @@ void setupOTA()
     });
     ArduinoOTA.onError([](ota_error_t error) {
         display.clear();
-        display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "OTA Error :");
+        display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "OTA Error :");
         if (error == OTA_AUTH_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Auth Failed");
+            display.drawString(display.getWidth() / 2, 32, "Auth Failed");
         else if (error == OTA_BEGIN_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Begin Failed");
+            display.drawString(display.getWidth() / 2, 32, "Begin Failed");
         else if (error == OTA_CONNECT_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Connect Failed");
+            display.drawString(display.getWidth() / 2, 32, "Connect Failed");
         else if (error == OTA_RECEIVE_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "Receive Failed");
+            display.drawString(display.getWidth() / 2, 32, "Receive Failed");
         else if (error == OTA_END_ERROR)
-            display.drawString(DISPLAY_WIDTH / 2, 32, "End Failed");
+            display.drawString(display.getWidth() / 2, 32, "End Failed");
         display.display();
         delay(5000);
     });
@@ -124,11 +125,11 @@ void setupWifi()
 {
     String mac = WiFi.macAddress();
     Serial.println("MAC:" + mac);
-    if (mac == "***REMOVED***")
+    if (mac == MAC_BED)
     {
         location = "Bedroom";
     }
-    else if (mac = "***REMOVED***")
+    else if (mac = MAC_LIVING)
     {
         location = "Living Room";
     }
@@ -139,15 +140,15 @@ void setupWifi()
     while (WiFi.waitForConnectResult() != WL_CONNECTED)
     {
         Serial.println("Connection Failed! Rebooting...");
-        display.drawString(DISPLAY_WIDTH / 2, 10, "Connection Failed!");
+        display.drawString(display.getWidth() / 2, 10, "Connection Failed!");
         display.display();
         delay(3000);
         ESP.restart();
     }
 
     display.clear();
-    display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 10, "IP:" + WiFi.localIP().toString());
-    display.drawString(DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2, "Monitor for:" + location);
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2 - 10, "IP:" + WiFi.localIP().toString());
+    display.drawString(display.getWidth() / 2, display.getHeight() / 2, "Monitor for:" + location);
     display.display();
     delay(3000);
     display.clear();
