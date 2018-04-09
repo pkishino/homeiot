@@ -22,6 +22,7 @@ WiFiClient wifiClient;
 const char *mqtt_server = MQTT_IP;
 const char *mqtt_user = MQTT_USER;
 const char *mqtt_password = MQTT_PASS;
+const int mqtt_port = MQTT_PORT;
 
 String sensor = "sensor/";
 
@@ -43,7 +44,7 @@ void setup()
     Serial.println("Serial up and running");
     setupWifi();
     setupOTA();
-    mqttClient.setServer(mqtt_server, 1883);
+    mqttClient.setServer(mqtt_server, mqtt_port);
 }
 
 void loop()
